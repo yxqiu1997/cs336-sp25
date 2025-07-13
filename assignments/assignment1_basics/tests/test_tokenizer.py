@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import resource
 import sys
 
 import psutil
@@ -20,6 +19,10 @@ def memory_limit(max_mem):
     def decorator(f):
         def wrapper(*args, **kwargs):
             process = psutil.Process(os.getpid())
+            try:
+                import resource
+            except ModuleNotFoundError:
+                return
             prev_limits = resource.getrlimit(resource.RLIMIT_AS)
             resource.setrlimit(resource.RLIMIT_AS, (process.memory_info().rss + max_mem, -1))
             try:
