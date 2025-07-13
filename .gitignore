@@ -181,3 +181,5 @@ cython_debug/
 .cursorindexingignore
 
 *.txt
+.DS_Store
+.idea/
