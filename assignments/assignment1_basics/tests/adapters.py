@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
-import regex as re
-from collections import defaultdict
 from typing import IO, Any, BinaryIO
 from collections.abc import Iterable
 from jaxtyping import Float, Int
@@ -13,6 +10,7 @@ import numpy.typing as npt
 import torch
 from torch import Tensor
 
+from cs336_basics.bpe_trainer import BPETrainer
 
 
 def run_linear(
@@ -592,77 +590,23 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    # Regular expression for pre-tokenization
-    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+    vocab, next_id = BPETrainer.init_vocab(special_tokens)
+    pre_token_counts = BPETrainer.pre_tokenize(input_path, special_tokens)
 
-    # Step 1: Initialise vocabulary with all single-byte tokens (0–255)
-    vocab_dict: dict[int, bytes] = {i: bytes([i]) for i in range(256)}
-    vocab_index = 256
+    merges = []
 
-    # Convert special tokens to bytes and add to vocab if not already present
-    special_token_bytes = {token.encode("utf-8") for token in special_tokens}
-    for token_bytes in special_token_bytes - set(vocab_dict.values()):
-        vocab_dict[vocab_index] = token_bytes
-        vocab_index += 1
-
-    # Step 2: Pre-tokenization and frequency counting
-    token_sequence_counter = defaultdict(int)
-
-    text = Path(input_path).read_text(encoding="utf-8")
-
-    # Split text around special tokens (these are assumed to be preserved separately)
-    segments = re.split("|".join(map(re.escape, special_tokens)), text)
-
-    for segment in segments:
-        for match in re.finditer(PAT, segment):
-            word = match.group(0)
-            # Convert word into tuple of byte elements (e.g., "Hi" -> (b'H', b'i'))
-            byte_token_tuple = tuple(bytes([b]) for b in word.encode("utf-8"))
-            token_sequence_counter[byte_token_tuple] += 1
-
-    # Step 3: Iteratively perform BPE merges until target vocab size is reached
-    merge_history = []
-
-    while len(vocab_dict) < vocab_size:
-        pair_frequency = defaultdict(int)
-
-        # Count the frequency of each adjacent byte-pair across all tokens
-        for byte_tuple, count in token_sequence_counter.items():
-            for i in range(len(byte_tuple) - 1):
-                pair_frequency[(byte_tuple[i], byte_tuple[i + 1])] += count
-
-        if not pair_frequency:
+    while len(vocab) < vocab_size:
+        pair_counts = BPETrainer.count_byte_pairs(pre_token_counts)
+        if not pair_counts:
             break
 
-        # Find the most frequent byte-pair (ties broken by max() for determinism)
-        max_freq = max(pair_frequency.values())
-        merge_pair = max([pair for pair, freq in pair_frequency.items() if freq == max_freq])
+        best_pair = BPETrainer.select_best_pair(pair_counts)
+        new_token = best_pair[0] + best_pair[1]
 
-        byte_a, byte_b = merge_pair
+        vocab[next_id] = new_token
+        next_id += 1
 
-        # Concatenate bytes to form new token
-        new_token = byte_a + byte_b
-        vocab_dict[vocab_index] = new_token
-        vocab_index += 1
+        BPETrainer.apply_merge(pre_token_counts, best_pair, new_token)
+        merges.append(best_pair)
 
-        # Prepare to update token sequences with new merged token
-        new_counter = defaultdict(int)
-        for old_seq, count in token_sequence_counter.items():
-            i = 0
-            new_seq = []
-            while i < len(old_seq):
-                # If the current position matches the best pair, replace it with new token
-                if old_seq[i:i + 2] == merge_pair:
-                    new_seq.append(new_token)
-                    i += 2
-                else:
-                    new_seq.append(old_seq[i])
-                    i += 1
-            # If the current position matches the best pair, replace it with new token
-            new_seq = tuple(new_seq)
-            new_counter[new_seq] += count
-
-        token_sequence_counter = new_counter
-        merge_history.append(merge_pair)
-
-    return vocab_dict, merge_history
+    return vocab, merges
