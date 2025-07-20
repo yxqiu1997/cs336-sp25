@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-import os
-
-from typing import IO, Any, BinaryIO
-from collections.abc import Iterable
-from jaxtyping import Float, Int
-
 import numpy.typing as npt
+import os
 import torch
-from torch import Tensor
 
+from collections.abc import Iterable
 from cs336_basics.bpe_trainer import BPETrainer
+from cs336_basics.linear import Linear
 from cs336_basics.tokenizer import Tokenizer
+from jaxtyping import Float, Int
+from torch import Tensor
+from typing import IO, Any, BinaryIO
 
 
 def run_linear(
@@ -32,8 +31,10 @@ def run_linear(
     Returns:
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
-
-    raise NotImplementedError
+    model = Linear(d_in, d_out)
+    with torch.no_grad():
+        model.weight.copy_(weights)
+    return model(in_features)
 
 
 def run_embedding(
